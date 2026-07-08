@@ -2,23 +2,12 @@
 #include <cassert>
 #include <cfloat>
 #include <cmath>
-#include <cstdlib>
 #include <cstring>
-#include <hip/hip_runtime.h>
 #include <mpi.h>
 #include <vector>
 
 #include "cyclotron.h"
-
-static void checkHip(const hipError_t err, const char *const file, const int line)
-{
-  if (err == hipSuccess) return;
-  fprintf(stderr,"GPU ERROR AT LINE %d OF FILE '%s': %s %s\n",line,file,hipGetErrorName(err),hipGetErrorString(err));
-  fflush(stderr);
-  exit(err);
-}
-
-#define CHECK(X) checkHip(X,__FILE__,__LINE__)
+#include "gpu.h"
 
 void cyclotron(const int iters,
                const size_t recvExtra,
@@ -31,7 +20,6 @@ void cyclotron(const int iters,
                const bool sendStack,
                const bool barrier)
 {
-  if (iters <= 0) return;
 
   // init
 
@@ -39,6 +27,34 @@ void cyclotron(const int iters,
   MPI_Comm_rank(MPI_COMM_WORLD,&rank);
   int commSize = 0;
   MPI_Comm_size(MPI_COMM_WORLD,&commSize);
+
+  if (rank == 0) {
+    printf("### %s: %d calls",__FUNCTION__,iters);
+    printf(" to MPI_Allreduce(send,recv,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD)");
+    printf(" on %d tasks", commSize);
+    if (barrier) printf(" preceded by an MPI_Barrier(MPI_COMM_WORLD)");
+    printf(" where send is");
+    if (sendStack) {
+      printf(" on the stack");
+    } else {
+      printf(" %s allocated",(sendGPU ? "GPU" : "host"));
+      if (sendOffset) printf(" offset %luB from the base pointer",sendOffset);
+      if (sendExtra) printf(" with %luB extra",sendExtra);
+    }
+    printf(" and recv is");
+    if (recvStack) {
+      printf(" on the stack");
+    } else {
+      printf(" %s allocated",(recvGPU ? "GPU" : "host"));
+      if (recvOffset) printf(" offset %luB from the base pointer",recvOffset);
+      if (recvExtra) printf(" with %luB extra",recvExtra);
+    }
+    printf("\n");
+    fflush(stdout);
+  }
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  if (iters <= 0) return;
 
   const double sendValue = double(rank+1);
   const double expected = double(commSize*(commSize+1)/2);
@@ -51,8 +67,8 @@ void cyclotron(const int iters,
       CHECK(hipMalloc(&recvBase,recvSize));
       CHECK(hipMemset(recvBase,0,recvSize));
       CHECK(hipDeviceSynchronize());
-    else {
-      recvBase = malloc(recvSize);
+    } else {
+      recvBase = reinterpret_cast<char*>(malloc(recvSize));
       assert(recvBase);
       memset(recvBase,0,recvSize);
     }
@@ -68,7 +84,7 @@ void cyclotron(const int iters,
       CHECK(hipMemset(sendBase,0,sendSize));
       CHECK(hipDeviceSynchronize());
     } else {
-      sendBase = malloc(sendSize);
+      sendBase = reinterpret_cast<char*>(malloc(sendSize));
       memset(sendBase,0,sendSize);
     }
     send = reinterpret_cast<double*>(sendBase+sendOffset);
@@ -105,12 +121,12 @@ void cyclotron(const int iters,
   // verify results
 
   const double maxDiff = expected*double(FLT_EPSILON);
-  int errors = 0
+  int errors = 0;
   for (int i = 0; i < iters; i++) {
     const double diff = std::abs(expected-results[i]);
     if (diff > maxDiff) {
       errors++;
-      fprintf(stderr,"__FUNCTION__ ERROR #%d at rank %d iteration %d: expected %g, got %g, diff %g > %g\n",errors,rank,i,expected,result,diff,maxDiff);
+      fprintf(stderr,"__FUNCTION__ ERROR #%d at rank %d iteration %d: expected %g, got %g, diff %g > %g\n",errors,rank,i,expected,results[i],diff,maxDiff);
       fflush(stderr);
     }
   }
@@ -129,7 +145,8 @@ void cyclotron(const int iters,
     if (times[i] == maxTimes[i]) slowest[i] = rank;
   }
 
-  std::vector<double> avgTimes, maxFastest, maxSlowest;
+  std::vector<double> avgTimes;
+  std::vector<int> maxFastest, maxSlowest;
   if (rank == 0) {
     avgTimes.resize(iters);
     maxFastest.resize(iters);
@@ -140,7 +157,7 @@ void cyclotron(const int iters,
   MPI_Reduce(slowest.data(),maxSlowest.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
 
   if (rank == 0) {
-    const double us = 1e-6;
+    const double us = 1e6;
     const double usAvg = us/double(commSize);
     for (int i = 0; i < iters; i++) {
       maxTimes[i] *= us;
@@ -194,6 +211,7 @@ void cyclotron(const int iters,
         printf("%d %d %d\n",i,rankFastest[i],rankSlowest[i]);
       }
     }
+    fflush(stdout);
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
