@@ -1,0 +1,4 @@
+*.o
+cyclotron
+tee
+.??*
