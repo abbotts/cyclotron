@@ -8,5 +8,5 @@ set -x
 #ldd cyclotron
 
 export MPICH_GPU_SUPPORT_ENABLED=1
-srun -p testing -t3 -N2 -n16 --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron
+srun -p testing -t3 -N1 -n8 --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron $@
 
