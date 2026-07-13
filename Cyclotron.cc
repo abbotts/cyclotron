@@ -151,7 +151,7 @@ void Cyclotron::run() const
     const double diff = std::abs(expected-results[i]);
     if (diff > maxDiff) {
       errors++;
-      fprintf(stderr,"__FUNCTION__ ERROR #%d at rank %d iteration %d: expected %g, got %g, diff %g > %g\n",errors,rank,i,expected,results[i],diff,maxDiff);
+      fprintf(stderr,"%s ERROR #%d at rank %d iteration %d: expected %g, got %g, diff %g > %g\n",__FUNCTION__,errors,rank,i,expected,results[i],diff,maxDiff);
       fflush(stderr);
     }
   }
