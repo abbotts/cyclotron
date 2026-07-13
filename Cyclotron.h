@@ -4,11 +4,12 @@ enum class Location { GPU, HOST, STACK };
 
 struct BufferOptions {
   Location loc;
-  long offset, extra;
+  long offset, delta, extra;
 
   BufferOptions():
     loc(Location::HOST),
     offset(0),
+    delta(0),
     extra(0)
   {}
 

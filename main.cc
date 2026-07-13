@@ -55,16 +55,17 @@ int main(int argc, char **argv)
     }
 
     if (usage) {
-      fprintf(stderr,"Usage: %s [-h] | [-b] [-i <number>] [-r <location>:<offset>:<extra>] [-s <location>:<offset>:<extra>]\n",cmd);
+      fprintf(stderr,"Usage: %s [-h] | [-b] [-i <number>] [-r <loc>:<offset>:<delta>:<extra>] [-s <loc>:<offset>:<delta>:<extra>]\n",cmd);
       fprintf(stderr,"\t-h\t print this usage message and exit\n");
       fprintf(stderr,"\t-b\t add MPI_Barrier before each MPI_Allreduce\n");
       fprintf(stderr,"\t-i\t number of iterations\n");
       fprintf(stderr,"\t-r\t recv options\n");
       fprintf(stderr,"\t-s\t send options\n");
-      fprintf(stderr,"\t<location> can be 'host' or 'gpu' or 'stack' (only the first letter matters)\n");
-      fprintf(stderr,"\t<offset> is the offset from the base allocation pointer, in bytes\n");
-      fprintf(stderr,"\t<extra> is extra allocation after offset and buffer, in bytes\n");
-      fprintf(stderr,"\t<offset> and <extra> are ignored for 'stack'\n");
+      fprintf(stderr,"\t<loc> can be 'host' or 'gpu' or 'stack' (only the first letter matters)\n");
+      fprintf(stderr,"\t<offset> is the offset from the base allocation pointer, in doubles\n");
+      fprintf(stderr,"\t<delta> is the additional offset per iteration, in doubles\n");
+      fprintf(stderr,"\t<extra> is extra allocation after offset and buffer, in doubles\n");
+      fprintf(stderr,"\t<offset>, <delta>, and <extra> are ignored for 'stack'\n");
       fflush(stderr);
     }
   }

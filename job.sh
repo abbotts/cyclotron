@@ -11,79 +11,49 @@ TASKS=$(( 8 * SLURM_NNODES ))
 
 srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r stack
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:0:1
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s stack
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r stack -s stack
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:0:1
 sleep 1
 
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:8
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -b
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:264
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:0:1 -b
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:4104
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:4104:4104
-sleep 1
-
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:8
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:264
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:4104
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:4104:4104
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:0:1 -b
 sleep 1
 
 export MPICH_GPU_SUPPORT_ENABLED=1
 
 srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r stack
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:0:1
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s stack
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r stack -s stack
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:0:1
 sleep 1
 
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:8
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -b
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:264
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:0:1 -b
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:4104
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r host:4104:4104
-sleep 1
-
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:8
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:264
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:4104
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:4104:4104
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s host:0:1 -b
 sleep 1
 
 srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu:8
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu:0:1
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu:264
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu:4104
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu:4104:4104
-sleep 1
-
 srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu:8
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu:0:1
 sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu:264
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu:4104
-sleep 1
-srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu:4104:4104
 
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu -b
+sleep 1
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -r gpu:0:1 -b
+sleep 1
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu -b
+sleep 1
+srun -t3 -N${SLURM_NNODES} -n${TASKS} --ntasks-per-gpu=1 --gpu-bind=closest ./cyclotron -s gpu:0:1 -b
+sleep 1
 

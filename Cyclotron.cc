@@ -27,10 +27,14 @@ bool BufferOptions::set(const char *arg)
 
   for (; *arg != ':'; arg++) if (*arg == 0) return true;
 
-  long newExtra, newOffset;
-  if (sscanf(arg,":%ld:%ld",&newOffset,&newExtra) == 2) {
+  long newOffset, newDelta, newExtra;
+  if (sscanf(arg,":%ld:%ld:%ld",&newOffset,&newDelta,&newExtra) == 3) {
     offset = newOffset;
+    delta = newDelta;
     extra = newExtra;
+  } else if (sscanf(arg,":%ld:%ld",&newOffset,&newDelta) == 2) {
+    offset = newOffset;
+    delta = newDelta;
   } else if (sscanf(arg,":%ld",&newOffset) == 1) {
     offset = newOffset;
   } else {
@@ -56,16 +60,18 @@ void Cyclotron::run() const
       printf(" on the stack");
     } else {
       printf(" %s allocated",(sopt.loc == Location::GPU ? "GPU" : "host"));
-      if (sopt.offset) printf(" offset %luB from the base pointer",sopt.offset);
-      if (sopt.extra) printf(" with %luB extra",sopt.extra);
+      if (sopt.offset) printf(" offset %lu doubles from the base pointer",sopt.offset);
+      if (sopt.delta) printf(" plus %lu doubles each iteration",sopt.delta);
+      if (sopt.extra) printf(" with %lu doubles extra",sopt.extra);
     }
     printf(" and recv is");
     if (ropt.loc == Location::STACK) {
       printf(" on the stack");
     } else {
       printf(" %s allocated",(ropt.loc == Location::GPU ? "GPU" : "host"));
-      if (ropt.offset) printf(" offset %luB from the base pointer",ropt.offset);
-      if (ropt.extra) printf(" with %luB extra",ropt.extra);
+      if (ropt.offset) printf(" offset %lu doubles from the base pointer",ropt.offset);
+      if (ropt.delta) printf(" plus %lu doubles each iteration",ropt.delta);
+      if (ropt.extra) printf(" with %lu doubles extra",ropt.extra);
     }
     printf("\n");
     fflush(stdout);
@@ -77,39 +83,32 @@ void Cyclotron::run() const
   const double sendValue = double(rank+1);
   const double expected = double(commSize*(commSize+1)/2);
 
-  double *recv = nullptr;
-  char *recvBase = nullptr;
-  const long recvSize = sizeof(double)+ropt.offset+ropt.extra;
+  double *recvBase = nullptr;
+  const long recvSize = sizeof(double)*(ropt.offset+1+(iters-1)*ropt.delta+ropt.extra);
   if (ropt.loc != Location::STACK) {
     if (ropt.loc == Location::GPU) {
       CHECK(hipMalloc(&recvBase,recvSize));
       CHECK(hipMemset(recvBase,0,recvSize));
       CHECK(hipDeviceSynchronize());
     } else { // Location::HOST
-      recvBase = reinterpret_cast<char*>(malloc(recvSize));
+      recvBase = reinterpret_cast<double*>(malloc(recvSize));
       assert(recvBase);
       memset(recvBase,0,recvSize);
     }
-    recv = reinterpret_cast<double*>(recvBase+ropt.offset);
   }
 
-  double *send = nullptr;
-  char *sendBase = nullptr;
-  const long sendSize = sizeof(double)+sopt.offset+sopt.extra;
+  double *sendBase = nullptr;
+  const long sendCount = sopt.offset+1+(iters-1)*sopt.delta+sopt.extra;
+  const long sendSize = sizeof(double)*sendCount;
   if (sopt.loc != Location::STACK) {
+    std::vector<double> sendCopy(sendCount,sendValue);
     if (sopt.loc == Location::GPU) {
       CHECK(hipMalloc(&sendBase,sendSize));
-      CHECK(hipMemset(sendBase,0,sendSize));
+      CHECK(hipMemcpyHtoD(sendBase,sendCopy.data(),sendSize));
       CHECK(hipDeviceSynchronize());
     } else { // Location::HOST
-      sendBase = reinterpret_cast<char*>(malloc(sendSize));
-      memset(sendBase,0,sendSize);
-    }
-    send = reinterpret_cast<double*>(sendBase+sopt.offset);
-    if (sopt.loc == Location::GPU) {
-      CHECK(hipMemcpyHtoD(send,&sendValue,sizeof(sendValue)));
-    } else {
-      *send = sendValue;
+      sendBase = reinterpret_cast<double*>(malloc(sendSize));
+      memcpy(sendBase,sendCopy.data(),sendSize);
     }
   }
 
@@ -120,25 +119,27 @@ void Cyclotron::run() const
 
   MPI_Barrier(MPI_COMM_WORLD);
   for (int i = 0; i < iters; i++) {
+    double *recv = nullptr;
+    double *send = nullptr;
     double recvTemp, sendTemp;
     if (ropt.loc == Location::STACK) {
       recvTemp = 0;
       recv = &recvTemp;
+    } else {
+      recv = recvBase+ropt.offset+i*ropt.delta;
     }
     if (sopt.loc == Location::STACK) {
       sendTemp = sendValue;
       send = &sendTemp;
+    } else {
+      send = sendBase+sopt.offset+i*sopt.delta;
     }
     const double before = MPI_Wtime();
     if (barrier) MPI_Barrier(MPI_COMM_WORLD);
     MPI_Allreduce(send,recv,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
     const double after = MPI_Wtime();
     times[i] = after-before;
-    if (ropt.loc == Location::GPU) {
-      CHECK(hipMemcpyDtoH(results.data()+i,recv,sizeof(double)));
-    } else {
-      results[i] = *recv;
-    }
+    results[i] = *recv;
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -242,7 +243,6 @@ void Cyclotron::run() const
   // cleanup
 
   if (recvBase) {
-    recv = nullptr;
     if (ropt.loc == Location::GPU) {
       CHECK(hipFree(recvBase));
     } else {
@@ -251,7 +251,6 @@ void Cyclotron::run() const
     recvBase = nullptr;
   }
   if (sendBase) {
-    send = nullptr;
     if (sopt.loc == Location::GPU) {
       CHECK(hipFree(sendBase));
     } else {
