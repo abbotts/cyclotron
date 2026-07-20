@@ -81,7 +81,7 @@ void Cyclotron::run() const
   if (iters <= 0) return;
 
   const double sendValue = double(rank+1);
-  const double expected = double(commSize*(commSize+1)/2);
+  const double expected = double(commSize)*double(commSize+1)/2.0;
 
   double *recvBase = nullptr;
   const long recvSize = sizeof(double)*(ropt.offset+1+(iters-1)*ropt.delta+ropt.extra);
