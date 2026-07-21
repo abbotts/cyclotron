@@ -17,7 +17,7 @@ int main(int argc, char **argv)
   int usage = 0;
   if (rank == 0) {
     const char *const cmd = argv[0];
-    for (char c = 0; c != -1; c = getopt(argc,argv,":hbi:r:s:")) {
+    for (char c = 0; c != -1; c = getopt(argc,argv,":hbci:r:s:")) {
       switch(c) {
         case '?':
           fprintf(stderr,"ERROR: %s unknown argument '-%c'\n",cmd,optopt);
@@ -32,6 +32,9 @@ int main(int argc, char **argv)
           break;
         case 'b':
           cyc.barrier = true;
+          break;
+        case 'c':
+          cyc.switcheroo = true;
           break;
         case 'i':
           if (sscanf(optarg,"%d",&cyc.iters) != 1) {
@@ -58,6 +61,7 @@ int main(int argc, char **argv)
       fprintf(stderr,"Usage: %s [-h] | [-b] [-i <number>] [-r <loc>:<offset>:<delta>:<extra>] [-s <loc>:<offset>:<delta>:<extra>]\n",cmd);
       fprintf(stderr,"\t-h\t print this usage message and exit\n");
       fprintf(stderr,"\t-b\t add MPI_Barrier before each MPI_Allreduce\n");
+      fprintf(stderr,"\t-c\t record nonvoluntary context switches\n");
       fprintf(stderr,"\t-i\t number of iterations\n");
       fprintf(stderr,"\t-r\t recv options\n");
       fprintf(stderr,"\t-s\t send options\n");

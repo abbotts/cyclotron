@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <cfloat>
 #include <cmath>
@@ -6,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <mpi.h>
+#include <thread>
 #include <vector>
 
 #include "Cyclotron.h"
@@ -43,6 +45,22 @@ bool BufferOptions::set(const char *arg)
   return true;
 }
 
+static void switchSpin(FILE *const file, std::atomic<long> *const switchCount, std::atomic<int> *const stopSpinning)
+{
+  char *line = nullptr;
+  size_t cap = 0;
+  long switchCountNew = 0;
+  while (getline(&line,&cap,file) != -1) {
+    if (sscanf(line,"nonvoluntary_ctxt_switches: %ld",&switchCountNew) == 1) {
+      *switchCount = switchCountNew;
+      std::this_thread::yield();
+      rewind(file);
+    }
+    if (*stopSpinning) break;
+  }
+  fclose(file);
+}
+
 void Cyclotron::run() const
 {
   int rank = MPI_PROC_NULL;
@@ -54,7 +72,7 @@ void Cyclotron::run() const
     printf("### %s: %d calls",__FUNCTION__,iters);
     printf(" to MPI_Allreduce(send,recv,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD)");
     printf(" on %d tasks", commSize);
-    if (barrier) printf(" preceded by an MPI_Barrier(MPI_COMM_WORLD)");
+    if (barrier) printf(" preceded by an untimed MPI_Barrier(MPI_COMM_WORLD)");
     printf(" where send is");
     if (sopt.loc == Location::STACK) {
       printf(" on the stack");
@@ -73,6 +91,7 @@ void Cyclotron::run() const
       if (ropt.delta) printf(" plus %lu doubles each iteration",ropt.delta);
       if (ropt.extra) printf(" with %lu doubles extra",ropt.extra);
     }
+    if (switcheroo) printf(" with counts of nonvoluntary context switches");
     printf("\n");
     fflush(stdout);
   }
@@ -115,6 +134,20 @@ void Cyclotron::run() const
   std::vector<double> times(iters);
   std::vector<double> results(iters);
 
+  FILE *procStatus = nullptr;
+  std::thread switchThread;
+  std::atomic<int> stopSpinning(0);
+  std::atomic<long> switchCount(0);
+  std::vector<long> switchCounts;
+  if (switcheroo) {
+      procStatus = fopen("/proc/self/status","r");
+      assert(procStatus);
+      switchThread = std::thread(switchSpin,procStatus,&switchCount,&stopSpinning);
+      switchCounts.resize(iters,0);
+      MPI_Barrier(MPI_COMM_WORLD);
+      switchCounts[0] = switchCount;
+  }
+
   // run benchmark
 
   MPI_Barrier(MPI_COMM_WORLD);
@@ -134,12 +167,13 @@ void Cyclotron::run() const
     } else {
       send = sendBase+sopt.offset+i*sopt.delta;
     }
-    const double before = MPI_Wtime();
     if (barrier) MPI_Barrier(MPI_COMM_WORLD);
+    const double before = MPI_Wtime();
     MPI_Allreduce(send,recv,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
     const double after = MPI_Wtime();
     times[i] = after-before;
     results[i] = *recv;
+    if (switcheroo) switchCounts[i+1] = switchCount;
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -160,6 +194,9 @@ void Cyclotron::run() const
 
   // print results
 
+  const double us = 1e6;
+  for (int i = 0; i < iters; i++) times[i] *= us;
+
   std::vector<double> maxTimes(iters), minTimes(iters);
   MPI_Allreduce(times.data(),maxTimes.data(),iters,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
   MPI_Allreduce(times.data(),minTimes.data(),iters,MPI_DOUBLE,MPI_MIN,MPI_COMM_WORLD);
@@ -172,25 +209,93 @@ void Cyclotron::run() const
 
   std::vector<double> avgTimes;
   std::vector<int> maxFastest, maxSlowest;
+  std::vector<double> avgTimeTask,maxTimeTask,minTimeTask;
+
   if (rank == 0) {
     avgTimes.resize(iters);
     maxFastest.resize(iters);
     maxSlowest.resize(iters);
+    if (iters > 1) {
+      avgTimeTask.resize(commSize);
+      maxTimeTask.resize(commSize);
+      minTimeTask.resize(commSize);
+    }
   }
   MPI_Reduce(times.data(),avgTimes.data(),iters,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
   MPI_Reduce(fastest.data(),maxFastest.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
   MPI_Reduce(slowest.data(),maxSlowest.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
 
-  if (rank == 0) {
-    const double us = 1e6;
-    const double usAvg = us/double(commSize);
+
+  if (iters > 1) {
+    double avgTimeMe = times[1];
+    double maxTimeMe = times[1];
+    double minTimeMe = times[1];
+    for (int i = 2; i < iters; i++) {
+      avgTimeMe += times[i];
+      maxTimeMe = std::max(maxTimeMe,times[i]);
+      minTimeMe = std::min(minTimeMe,times[i]);
+    }
+    avgTimeMe /= double(iters-1);
+
+    MPI_Gather(&avgTimeMe,1,MPI_DOUBLE,avgTimeTask.data(),1,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    MPI_Gather(&maxTimeMe,1,MPI_DOUBLE,maxTimeTask.data(),1,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    MPI_Gather(&minTimeMe,1,MPI_DOUBLE,minTimeTask.data(),1,MPI_DOUBLE,0,MPI_COMM_WORLD);
+  }
+
+  std::vector<long> maxSwitches,minSwitches,sumSwitches;
+  std::vector<int> maxMaxSwitched,maxMinSwitched;
+  std::vector<long> maxSwitchTask,minSwitchTask,sumSwitchTask;
+  if (switcheroo) {
+    std::vector<long> switches(iters);
+    for (int i = 0; i < iters; i++) switches[i] = switchCounts[i+1]-switchCounts[i];
+    maxSwitches.resize(iters);
+    minSwitches.resize(iters);
+    MPI_Allreduce(switches.data(),maxSwitches.data(),iters,MPI_LONG,MPI_MAX,MPI_COMM_WORLD);
+    MPI_Allreduce(switches.data(),minSwitches.data(),iters,MPI_LONG,MPI_MIN,MPI_COMM_WORLD);
+    std::vector<int> maxSwitched(iters), minSwitched(iters);
     for (int i = 0; i < iters; i++) {
-      maxTimes[i] *= us;
-      minTimes[i] *= us;
-      avgTimes[i] *= usAvg;
+      if (switches[i] == minSwitches[i]) minSwitched[i] = rank;
+      if (switches[i] == maxSwitches[i]) maxSwitched[i] = rank;
+    }
+    if (rank == 0) {
+      sumSwitches.resize(iters);
+      maxMaxSwitched.resize(iters);
+      maxMinSwitched.resize(iters);
+    }
+    MPI_Reduce(maxSwitched.data(),maxMaxSwitched.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
+    MPI_Reduce(minSwitched.data(),maxMinSwitched.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
+    MPI_Reduce(switches.data(),sumSwitches.data(),iters,MPI_LONG,MPI_SUM,0,MPI_COMM_WORLD);
+
+    if (iters > 0) {
+      long maxSwitchMe = switches[1];
+      long minSwitchMe = switches[1];
+      long sumSwitchMe = switches[1];
+      for (int i = 2; i < iters; i++) {
+        maxSwitchMe = std::max(maxSwitchMe,switches[i]);
+        minSwitchMe = std::min(minSwitchMe,switches[i]);
+        sumSwitchMe += switches[i];
+      }
+      if (rank == 0) {
+        maxSwitchTask.resize(commSize);
+        minSwitchTask.resize(commSize);
+        sumSwitchTask.resize(commSize);
+      }
+      MPI_Gather(&maxSwitchMe,1,MPI_LONG,maxSwitchTask.data(),1,MPI_LONG,0,MPI_COMM_WORLD);
+      MPI_Gather(&minSwitchMe,1,MPI_LONG,minSwitchTask.data(),1,MPI_LONG,0,MPI_COMM_WORLD);
+      MPI_Gather(&sumSwitchMe,1,MPI_LONG,sumSwitchTask.data(),1,MPI_LONG,0,MPI_COMM_WORLD);
+    }
+  }
+
+  if (rank == 0) {
+    const double perTask = 1.0/double(commSize);
+    const double perIter = 1.0/double(iters-1);
+
+    for (int i = 0; i < iters; i++) {
+      avgTimes[i] *= perTask;
     }
 
-    printf("# times for first iteration (us): min %g avg %g max %g\n",minTimes[0],avgTimes[0],maxTimes[0]);
+    printf("# first iteration times (us): min %g avg %g max %g\n",minTimes[0],avgTimes[0],maxTimes[0]);
+    if (switcheroo) printf("# first iteration nonvoluntary context switches: min %ld avg %g max %ld\n",minSwitches[0],double(sumSwitches[0])*perTask,maxSwitches[0]);
 
     if (iters > 1) {
       double avgTime = avgTimes[1];
@@ -203,37 +308,77 @@ void Cyclotron::run() const
       }
       avgTime /= double(iters-1);
       printf("# times for remaining %d iterations (us): min %g avg %g max %g\n",iters-1,minTime,avgTime,maxTime);
+
+      if (switcheroo) {
+        long minTask = minSwitches[1];
+        long maxTask = maxSwitches[1];
+        long minIter = sumSwitches[1];
+        long sumIter = sumSwitches[1];
+        long maxIter = sumSwitches[1];
+
+        for (int i = 2; i < iters; i++) {
+          minTask = std::min(minTask,minSwitches[i]);
+          maxTask = std::max(maxTask,maxSwitches[i]);
+          minIter = std::min(minIter,sumSwitches[i]);
+          sumIter += sumSwitches[i];
+          maxIter = std::max(maxIter,sumSwitches[i]);
+        }
+     
+        const double avgIter = double(sumIter)*perIter;
+        const double avgTask = avgIter*perTask;
+        printf("# nonvoluntary context switches for remaining %d iterations: total %ld min/task %ld avg/task %g max/task %ld min/iter %ld avg/iter %g max/iter%ld\n",iters-1,sumIter,minTask,avgTask,maxTask,minIter,avgIter,maxIter);
+
+      }
     }
 
-    printf("\n\n# times and ranks: iteration | min (us) | rank of min | avg (us) | max (us) | rank of max\n");
+    printf("\n\n# times and ranks: iteration | min (us) | rank of min | avg (us) | max (us) | rank of max");
+    if (switcheroo) printf(" | min switches | rank of min | total switches | max swtiches | rank of max");
+    printf("\n");
     for (int i = 0; i < iters; i++) {
-      printf("%d %g %d %g %g %d\n",i,minTimes[i],maxFastest[i],avgTimes[i],maxTimes[i],maxSlowest[i]);
+      printf("%d %g %d %g %g %d",i,minTimes[i],maxFastest[i],avgTimes[i],maxTimes[i],maxSlowest[i]);
+      if (switcheroo) printf(" %ld %d %ld %ld %d",minSwitches[i],maxMinSwitched[i],sumSwitches[i],maxSwitches[i],maxMaxSwitched[i]);
+      printf("\n");
     }
 
     if (iters > 1) {
 
       std::sort(avgTimes.begin()+1,avgTimes.end());
-      std::sort(maxTimes.begin()+1,maxTimes.end());
-      std::sort(minTimes.begin()+1,minTimes.end());
-
       std::reverse(avgTimes.begin()+1,avgTimes.end());
+
+      std::sort(maxTimes.begin()+1,maxTimes.end());
       std::reverse(maxTimes.begin()+1,maxTimes.end());
+
+      std::sort(minTimes.begin()+1,minTimes.end());
       std::reverse(minTimes.begin()+1,minTimes.end());
 
-      printf("\n\n# sorted excluding first iteration: place | min (us) | avg(us) | max (us)\n");
-      for (int i = 1; i < iters; i++) {
-        printf("%d %g %g %g\n",i,minTimes[i],avgTimes[i],maxTimes[i]);
+      printf("\n\n# sorted excluding first iteration: place | min (us) | avg (us) | max (us)");
+      if (switcheroo) {
+        std::sort(sumSwitches.begin()+1,sumSwitches.end());
+        std::reverse(sumSwitches.begin()+1,sumSwitches.end());
+
+        std::sort(maxSwitches.begin()+1,maxSwitches.end());
+        std::reverse(maxSwitches.begin()+1,maxSwitches.end());
+
+        printf(" | total switches | max switches/task");
       }
 
-      std::vector<int> rankFastest(commSize), rankSlowest(commSize);
+      printf("\n");
       for (int i = 1; i < iters; i++) {
-        rankFastest.at(maxFastest[i])++;
-        rankSlowest.at(maxSlowest[i])++;
+        printf("%d %g %g %g",i,minTimes[i],avgTimes[i],maxTimes[i]);
+        if (switcheroo) printf(" %ld %ld",sumSwitches[i],maxSwitches[i]);
+        printf("\n");
       }
+    }
 
-      printf("\n\n# count excluding first iteration: rank | fastest | slowest\n");
-      for (int i = 0; i < commSize; i++) {
-        printf("%d %d %d\n",i,rankFastest[i],rankSlowest[i]);
+    printf("\n\n# rank | min (us) | avg (us) | max (us)");
+    if (switcheroo) printf(" | total switches | min switches/iter | avg switches/iter | max switches/iter");
+    printf("\n");
+    for (int i = 0; i < commSize; i++) {
+      printf("%d %g %g %g",i,minTimeTask[i],avgTimeTask[i],maxTimeTask[i]);
+      if (switcheroo) {
+        const double avgSwitchTask = double(sumSwitchTask[i])*perIter;
+        printf(" %ld %ld %g %ld",sumSwitchTask[i],minSwitchTask[i],avgSwitchTask,maxSwitchTask[i]);
+        printf("\n");
       }
     }
     fflush(stdout);
@@ -241,6 +386,9 @@ void Cyclotron::run() const
   MPI_Barrier(MPI_COMM_WORLD);
 
   // cleanup
+
+  stopSpinning = 1;
+  if (switchThread.joinable()) switchThread.join();
 
   if (recvBase) {
     if (ropt.loc == Location::GPU) {

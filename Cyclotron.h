@@ -19,11 +19,13 @@ struct BufferOptions {
 struct Cyclotron {
   int barrier;
   int iters;
+  int switcheroo;
   BufferOptions ropt, sopt;
 
   Cyclotron():
     barrier(0),
-    iters(1000)
+    iters(1000),
+    switcheroo(0)
   {}
 
   void run() const;
