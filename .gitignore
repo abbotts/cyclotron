@@ -1,3 +1,6 @@
 *.o
 cyclotron
 tee
+.venv
+*.png
+*.pdf
