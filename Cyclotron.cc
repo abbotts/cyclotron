@@ -45,20 +45,29 @@ bool BufferOptions::set(const char *arg)
   return true;
 }
 
-static void switchSpin(FILE *const file, std::atomic<long> *const switchCount, std::atomic<int> *const stopSpinning)
+static int switchInits = 0;
+
+static long readSwitches()
 {
-  char *line = nullptr;
-  size_t cap = 0;
-  long switchCountNew = 0;
-  while (getline(&line,&cap,file) != -1) {
-    if (sscanf(line,"nonvoluntary_ctxt_switches: %ld",&switchCountNew) == 1) {
-      *switchCount = switchCountNew;
-      std::this_thread::yield();
-      rewind(file);
-    }
-    if (*stopSpinning) break;
+  static char *line = nullptr;
+  static size_t cap = 0;
+  static FILE *file = nullptr;
+
+  if (!file) {
+      file = fopen("/proc/self/status","r");
+      assert(file);
+      switchInits++;
+      assert(switchInits == 1);
   }
-  fclose(file);
+
+  long switches = 0;
+  rewind(file);
+  while (getline(&line,&cap,file) != -1) {
+    if (sscanf(line,"nonvoluntary_ctxt_switches: %ld",&switches) == 1) {
+      return switches;
+    }
+  }
+  return -1;
 }
 
 void Cyclotron::run() const
@@ -135,17 +144,10 @@ void Cyclotron::run() const
   std::vector<double> results(iters);
 
   FILE *procStatus = nullptr;
-  std::thread switchThread;
-  std::atomic<int> stopSpinning(0);
-  std::atomic<long> switchCount(0);
-  std::vector<long> switchCounts;
+  std::vector<long> switches;
   if (switcheroo) {
-      procStatus = fopen("/proc/self/status","r");
-      assert(procStatus);
-      switchThread = std::thread(switchSpin,procStatus,&switchCount,&stopSpinning);
-      switchCounts.resize(iters,0);
-      MPI_Barrier(MPI_COMM_WORLD);
-      switchCounts[0] = switchCount;
+    switches.resize(iters,0);
+    readSwitches();
   }
 
   // run benchmark
@@ -168,12 +170,14 @@ void Cyclotron::run() const
       send = sendBase+sopt.offset+i*sopt.delta;
     }
     if (barrier) MPI_Barrier(MPI_COMM_WORLD);
+    size_t switchesBefore;
+    if (switcheroo) switchesBefore = readSwitches();
     const double before = MPI_Wtime();
     MPI_Allreduce(send,recv,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
     const double after = MPI_Wtime();
+    if (switcheroo) switches[i] = readSwitches()-switchesBefore;
     times[i] = after-before;
     results[i] = *recv;
-    if (switcheroo) switchCounts[i+1] = switchCount;
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -246,8 +250,6 @@ void Cyclotron::run() const
   std::vector<int> maxMaxSwitched,maxMinSwitched;
   std::vector<long> maxSwitchTask,minSwitchTask,sumSwitchTask;
   if (switcheroo) {
-    std::vector<long> switches(iters);
-    for (int i = 0; i < iters; i++) switches[i] = switchCounts[i+1]-switchCounts[i];
     maxSwitches.resize(iters);
     minSwitches.resize(iters);
     MPI_Allreduce(switches.data(),maxSwitches.data(),iters,MPI_LONG,MPI_MAX,MPI_COMM_WORLD);
@@ -294,8 +296,8 @@ void Cyclotron::run() const
       avgTimes[i] *= perTask;
     }
 
-    printf("# first iteration times (us): min %g avg %g max %g\n",minTimes[0],avgTimes[0],maxTimes[0]);
-    if (switcheroo) printf("# first iteration nonvoluntary context switches: min %ld avg %g max %ld\n",minSwitches[0],double(sumSwitches[0])*perTask,maxSwitches[0]);
+    printf("## first iteration times (us): min %g avg %g max %g\n",minTimes[0],avgTimes[0],maxTimes[0]);
+    if (switcheroo) printf("## first iteration nonvoluntary context switches: min %ld avg %g max %ld\n",minSwitches[0],double(sumSwitches[0])*perTask,maxSwitches[0]);
 
     if (iters > 1) {
       double avgTime = avgTimes[1];
@@ -307,7 +309,7 @@ void Cyclotron::run() const
         minTime = std::min(minTime,minTimes[i]);
       }
       avgTime /= double(iters-1);
-      printf("# times for remaining %d iterations (us): min %g avg %g max %g\n",iters-1,minTime,avgTime,maxTime);
+      printf("## times for remaining %d iterations (us): min %g avg %g max %g\n",iters-1,minTime,avgTime,maxTime);
 
       if (switcheroo) {
         long minTask = minSwitches[1];
@@ -326,7 +328,7 @@ void Cyclotron::run() const
      
         const double avgIter = double(sumIter)*perIter;
         const double avgTask = avgIter*perTask;
-        printf("# nonvoluntary context switches for remaining %d iterations: total %ld min/task %ld avg/task %g max/task %ld min/iter %ld avg/iter %g max/iter%ld\n",iters-1,sumIter,minTask,avgTask,maxTask,minIter,avgIter,maxIter);
+        printf("## nonvoluntary context switches for remaining %d iterations: total %ld min/task %ld avg/task %g max/task %ld min/iter %ld avg/iter %g max/iter %ld\n",iters-1,sumIter,minTask,avgTask,maxTask,minIter,avgIter,maxIter);
 
       }
     }
@@ -378,17 +380,14 @@ void Cyclotron::run() const
       if (switcheroo) {
         const double avgSwitchTask = double(sumSwitchTask[i])*perIter;
         printf(" %ld %ld %g %ld",sumSwitchTask[i],minSwitchTask[i],avgSwitchTask,maxSwitchTask[i]);
-        printf("\n");
       }
+      printf("\n");
     }
     fflush(stdout);
   }
   MPI_Barrier(MPI_COMM_WORLD);
 
   // cleanup
-
-  stopSpinning = 1;
-  if (switchThread.joinable()) switchThread.join();
 
   if (recvBase) {
     if (ropt.loc == Location::GPU) {

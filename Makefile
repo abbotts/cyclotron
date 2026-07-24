@@ -1,6 +1,6 @@
 CXX := hipcc
-CXXFLAGS := -O -g -I$(MPICH_DIR)/include
-LDFLAGS := -L$(MPICH_DIR)/lib -lmpi $(PE_MPICH_GTL_DIR_amd_gfx90a) $(PE_MPICH_GTL_LIBS_amd_gfx90a)
+CXXFLAGS := -O -g -I${MPICH_DIR}/include
+LDFLAGS := -L${MPICH_DIR}/lib -lmpi ${CRAY_XPMEM_POST_LINK_OPTS} -lxpmem ${PE_MPICH_GTL_DIR_amd_gfx90a} ${PE_MPICH_GTL_LIBS_amd_gfx90a}
 
 EXE := cyclotron
 
