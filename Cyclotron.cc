@@ -203,11 +203,12 @@ void Cyclotron::run() const
   // We'll write one file per data point: times, context switches
   if (!output_path.empty()) {
     std::string times_path = output_path + "/times.asc";
-    std::string header = "# rank | Iteration times (us)\n";
-    std::string data_string = std::to_string(rank);
+    std::string header = "# Iteration times (us)\n";
+    std::string data_string = "";
     for (int i = 0; i < iters; i++) {
       // Yes this is slow as molasses. As long as iter_count isn't gigantic it should be fine
-      data_string += " " + std::to_string(times[i] * us);
+      if (i > 0) data_string += " ";
+      data_string += std::to_string(times[i] * us);
     }
     data_string += "\n";
     
@@ -222,10 +223,11 @@ void Cyclotron::run() const
 
     if (switcheroo) {
       std::string switches_path = output_path + "/switches.asc";
-      header = "# rank | Iteration context switches\n";
-      data_string = std::to_string(rank);
+      header = "# Iteration context switches\n";
+      data_string = "";
       for (int i = 0; i < iters; i++) {
-        data_string += " " + std::to_string(switches[i]);
+        if (i > 0) data_string += " ";
+        data_string += std::to_string(switches[i]);
       }
       data_string += "\n";
 
