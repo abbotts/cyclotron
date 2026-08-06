@@ -196,9 +196,52 @@ void Cyclotron::run() const
   MPI_Barrier(MPI_COMM_WORLD);
   if (errors) exit(errors);
 
+  const double us = 1e6;
+  
+  // If we have an output path, write the results to a file
+  // We'll write one file per data point: times, context switches
+  if (!output_path.empty()) {
+    std::string times_path = output_path + "/times.asc";
+    std::string header = "# rank | Iteration times (us)\n";
+    std::string data_string = std::to_string(rank);
+    for (int i = 0; i < iters; i++) {
+      // Yes this is slow as molasses. As long as iter_count isn't gigantic it should be fine
+      data_string += " " + std::to_string(times[i] * us);
+    }
+    data_string += "\n";
+    
+    if (rank == 0) {
+      data_string = header + data_string;
+    }
+
+    MPI_File fh;
+    MPI_File_open(MPI_COMM_WORLD,times_path.c_str(),MPI_MODE_CREATE|MPI_MODE_WRONLY,MPI_INFO_NULL,&fh);
+    MPI_File_write_ordered(fh,data_string.c_str(),data_string.size(),MPI_CHAR,MPI_STATUS_IGNORE);
+    MPI_File_close(&fh);
+
+    if (switcheroo) {
+      std::string switches_path = output_path + "/switches.asc";
+      header = "# rank | Iteration context switches\n";
+      data_string = std::to_string(rank);
+      for (int i = 0; i < iters; i++) {
+        data_string += " " + std::to_string(switches[i]);
+      }
+      data_string += "\n";
+
+      if (rank == 0) {
+        data_string = header + data_string;
+      }
+      MPI_File_open(MPI_COMM_WORLD,switches_path.c_str(),MPI_MODE_CREATE|MPI_MODE_WRONLY,MPI_INFO_NULL,&fh);
+      MPI_File_write_ordered(fh,data_string.c_str(),data_string.size(),MPI_CHAR,MPI_STATUS_IGNORE);
+      MPI_File_close(&fh);
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+  
+  }
+
   // print results
 
-  const double us = 1e6;
   for (int i = 0; i < iters; i++) times[i] *= us;
 
   std::vector<double> maxTimes(iters), minTimes(iters);
