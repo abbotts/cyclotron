@@ -5,6 +5,7 @@
 #include <cstring>
 #include "Cyclotron.h"
 #include "gpu.h"
+#include "bits.h"
 
 int main(int argc, char **argv)
 {
@@ -22,11 +23,11 @@ int main(int argc, char **argv)
   for (char c = 0; c != -1; c = getopt(argc,argv,":hbci:r:s:o:")) {
     switch(c) {
       case '?':
-        fprintf(stderr,"ERROR: %s unknown argument '-%c'\n",cmd,optopt);
+        mfprintf(stderr,"ERROR: %s unknown argument '-%c'\n",cmd,optopt);
         usage++;
         break;
       case ':':
-        fprintf(stderr,"ERROR: %s missing argument for '-%c'\n",cmd,optopt);
+        mfprintf(stderr,"ERROR: %s missing argument for '-%c'\n",cmd,optopt);
         usage++;
         break;
       case 'h':
@@ -39,29 +40,29 @@ int main(int argc, char **argv)
         cyc.switcheroo = true;
         break;
       case 'o':
-        fprintf(stderr, "option -o with argument '%s'\n", optarg);
+        mfprintf(stderr, "option -o with argument '%s'\n", optarg);
         arglen = std::strlen(optarg);
         copy(optarg, optarg + arglen, std::back_inserter(cyc.output_path));
         if (cyc.output_path.empty()) {
-          fprintf(stderr,"ERROR: %s bad argument '-o %s'\n",cmd,optarg);
+          mfprintf(stderr,"ERROR: %s bad argument '-o %s'\n",cmd,optarg);
           usage++;
         }
         break;
       case 'i':
         if (sscanf(optarg,"%d",&cyc.iters) != 1) {
-          fprintf(stderr,"ERROR: %s bad argument '-i %s'\n",cmd,optarg);
+          mfprintf(stderr,"ERROR: %s bad argument '-i %s'\n",cmd,optarg);
           usage++;
         }
         break;
       case 'r':
         if (!cyc.ropt.set(optarg)) {
-          fprintf(stderr,"ERROR: %s bad argument '-r %s'\n",cmd,optarg);
+          mfprintf(stderr,"ERROR: %s bad argument '-r %s'\n",cmd,optarg);
           usage++;
         }
         break;
       case 's':
         if (!cyc.sopt.set(optarg)) {
-          fprintf(stderr,"ERROR: %s bad argument '-s %s'\n",cmd,optarg);
+          mfprintf(stderr,"ERROR: %s bad argument '-s %s'\n",cmd,optarg);
           usage++;
         }
         break;
