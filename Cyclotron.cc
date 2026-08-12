@@ -9,6 +9,7 @@
 #include <mpi.h>
 #include <thread>
 #include <vector>
+#include <chrono>
 
 #include "Cyclotron.h"
 #include "gpu.h"
@@ -141,7 +142,17 @@ void Cyclotron::run() const
     }
   }
 
-  std::vector<double> times(iters);
+  // Record the start time of the benchmark using high-resolution clock
+  // Let rank 0 record the start time and broadcast it to all other ranks
+  std::chrono::high_resolution_clock::time_point begin;
+  if (rank == 0) {
+    begin = std::chrono::high_resolution_clock::now();
+  }
+
+  MPI_Bcast(&begin, sizeof(begin), MPI_BYTE, 0, MPI_COMM_WORLD);
+
+
+  std::vector<double[3]> times(iters);
   std::vector<double> results(iters);
 
   FILE *procStatus = nullptr;
@@ -173,11 +184,16 @@ void Cyclotron::run() const
     if (barrier) MPI_Barrier(MPI_COMM_WORLD);
     size_t switchesBefore;
     if (switcheroo) switchesBefore = readSwitches();
-    const double before = MPI_Wtime();
+    const auto before = std::chrono::high_resolution_clock::now();
     MPI_Allreduce(send,recv,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD);
-    const double after = MPI_Wtime();
+    const auto after = std::chrono::high_resolution_clock::now();
     if (switcheroo) switches[i] = readSwitches()-switchesBefore;
-    times[i] = after-before;
+    // store the elapsed time in the first element of the array to minimally disrupt the past
+    // need to convert from std::chrono::high_resolution_clock::duration to double representing s (which MPI_WTime would have returned)
+    times[i][0] = std::chrono::duration<double>(after-before).count();
+    // Store realtimes since benchmark start for before and after
+    times[i][1] = std::chrono::duration<double>(before-begin).count();
+    times[i][2] = std::chrono::duration<double>(after-begin).count();
     results[i] = *recv;
   }
   MPI_Barrier(MPI_COMM_WORLD);
@@ -202,12 +218,14 @@ void Cyclotron::run() const
   // If we have an output path, write the results to a file
   // We'll write one file per data point: times, context switches
   if (!output_path.empty()) {
+    // FIXME - After the current investigations we should move all this to a dedicated function,
+    // and use different data output formats. Having this be a multi-dimensional hdf5 file dataset would be preferred.
     std::string times_path = output_path + "/times.asc";
     std::string header = "# rank | Iteration times (us)\n";
     std::string data_string = std::to_string(rank);
     for (int i = 0; i < iters; i++) {
       // Yes this is slow as molasses. As long as iter_count isn't gigantic it should be fine
-      data_string += " " + std::to_string(times[i] * us);
+      data_string += " " + std::to_string(times[i][0] * us);
     }
     data_string += "\n";
     
@@ -217,6 +235,38 @@ void Cyclotron::run() const
 
     MPI_File fh;
     MPI_File_open(MPI_COMM_WORLD,times_path.c_str(),MPI_MODE_CREATE|MPI_MODE_WRONLY,MPI_INFO_NULL,&fh);
+    MPI_File_write_ordered(fh,data_string.c_str(),data_string.size(),MPI_CHAR,MPI_STATUS_IGNORE);
+    MPI_File_close(&fh);
+
+    // I know it seems silly, but the easiest way for me to handle start and end time data of each collective
+    // is if we just write starts to one file and ends to the other
+    std::string starts_path = output_path + "/starts.asc";
+    std::string ends_path = output_path + "/ends.asc";
+    header = "# rank | Iteration start times (us)\n";
+    data_string = std::to_string(rank);
+    for (int i = 0; i < iters; i++) {
+      data_string += " " + std::to_string(times[i][1] * us);
+    }
+    data_string += "\n";
+
+    if (rank == 0) {
+      data_string = header + data_string;
+    }
+    MPI_File_open(MPI_COMM_WORLD,starts_path.c_str(),MPI_MODE_CREATE|MPI_MODE_WRONLY,MPI_INFO_NULL,&fh);
+    MPI_File_write_ordered(fh,data_string.c_str(),data_string.size(),MPI_CHAR,MPI_STATUS_IGNORE);
+    MPI_File_close(&fh);
+
+    header = "# rank | Iteration end times (us)\n";
+    data_string = std::to_string(rank);
+    for (int i = 0; i < iters; i++) {
+      data_string += " " + std::to_string(times[i][2] * us);
+    }
+    data_string += "\n";
+
+    if (rank == 0) {
+      data_string = header + data_string;
+    }
+    MPI_File_open(MPI_COMM_WORLD,ends_path.c_str(),MPI_MODE_CREATE|MPI_MODE_WRONLY,MPI_INFO_NULL,&fh);
     MPI_File_write_ordered(fh,data_string.c_str(),data_string.size(),MPI_CHAR,MPI_STATUS_IGNORE);
     MPI_File_close(&fh);
 
@@ -243,16 +293,17 @@ void Cyclotron::run() const
 
   // print results
 
-  for (int i = 0; i < iters; i++) times[i] *= us;
+  std::vector<double> elapsedTimes(iters);
+  for (int i = 0; i < iters; i++) elapsedTimes[i] = times[i][0] * us;
 
   std::vector<double> maxTimes(iters), minTimes(iters);
-  MPI_Allreduce(times.data(),maxTimes.data(),iters,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
-  MPI_Allreduce(times.data(),minTimes.data(),iters,MPI_DOUBLE,MPI_MIN,MPI_COMM_WORLD);
+  MPI_Allreduce(elapsedTimes.data(),maxTimes.data(),iters,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
+  MPI_Allreduce(elapsedTimes.data(),minTimes.data(),iters,MPI_DOUBLE,MPI_MIN,MPI_COMM_WORLD);
 
   std::vector<int> fastest(iters,MPI_PROC_NULL), slowest(iters,MPI_PROC_NULL);
   for (int i = 0; i < iters; i++) {
-    if (times[i] == minTimes[i]) fastest[i] = rank;
-    if (times[i] == maxTimes[i]) slowest[i] = rank;
+    if (elapsedTimes[i] == minTimes[i]) fastest[i] = rank;
+    if (elapsedTimes[i] == maxTimes[i]) slowest[i] = rank;
   }
 
   std::vector<double> avgTimes;
@@ -269,19 +320,19 @@ void Cyclotron::run() const
       minTimeTask.resize(commSize);
     }
   }
-  MPI_Reduce(times.data(),avgTimes.data(),iters,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
+  MPI_Reduce(elapsedTimes.data(),avgTimes.data(),iters,MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
   MPI_Reduce(fastest.data(),maxFastest.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
   MPI_Reduce(slowest.data(),maxSlowest.data(),iters,MPI_INT,MPI_MAX,0,MPI_COMM_WORLD);
 
 
   if (iters > 1) {
-    double avgTimeMe = times[1];
-    double maxTimeMe = times[1];
-    double minTimeMe = times[1];
+    double avgTimeMe = elapsedTimes[1];
+    double maxTimeMe = elapsedTimes[1];
+    double minTimeMe = elapsedTimes[1];
     for (int i = 2; i < iters; i++) {
-      avgTimeMe += times[i];
-      maxTimeMe = std::max(maxTimeMe,times[i]);
-      minTimeMe = std::min(minTimeMe,times[i]);
+      avgTimeMe += elapsedTimes[i];
+      maxTimeMe = std::max(maxTimeMe,elapsedTimes[i]);
+      minTimeMe = std::min(minTimeMe,elapsedTimes[i]);
     }
     avgTimeMe /= double(iters-1);
 

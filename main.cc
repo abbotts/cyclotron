@@ -95,8 +95,8 @@ int main(int argc, char **argv)
   if (rank == 0) {
     if (!cyc.output_path.empty()) {
       fprintf(stderr, "Creating output directory '%s'\n", cyc.output_path.c_str());
-      auto already_exists = std::filesystem::create_directory(cyc.output_path);
-      if (!already_exists) {
+      auto created = std::filesystem::create_directory(cyc.output_path);
+      if (!created) {
         fprintf(stderr, "Warning: overwriting existing directory '%s'\n", cyc.output_path.c_str());
       }
     }
