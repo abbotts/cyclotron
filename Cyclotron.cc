@@ -147,9 +147,10 @@ void Cyclotron::run() const
   std::chrono::high_resolution_clock::time_point begin;
   if (rank == 0) {
     begin = std::chrono::high_resolution_clock::now();
+    auto begin_as_time_t = std::chrono::system_clock::to_time_t(begin);
     fprintf(stderr, "Benchmark start:\n\tEpoch time: %ld us\n\tHuman Time: %s",
-      std::chrono::duration_cast<std::chrono::microseconds>(begin.time_since_epoch()).count(),
-      std::ctime(&std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
+        std::chrono::duration_cast<std::chrono::microseconds>(begin.time_since_epoch()).count(),
+        std::ctime(&begin_as_time_t));
   }
 
   MPI_Bcast(&begin, sizeof(begin), MPI_BYTE, 0, MPI_COMM_WORLD);
