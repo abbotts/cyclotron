@@ -221,11 +221,12 @@ void Cyclotron::run() const
     // FIXME - After the current investigations we should move all this to a dedicated function,
     // and use different data output formats. Having this be a multi-dimensional hdf5 file dataset would be preferred.
     std::string times_path = output_path + "/times.asc";
-    std::string header = "# rank | Iteration times (us)\n";
-    std::string data_string = std::to_string(rank);
+    std::string header = "# Iteration times (us)\n";
+    std::string data_string = "";
     for (int i = 0; i < iters; i++) {
       // Yes this is slow as molasses. As long as iter_count isn't gigantic it should be fine
-      data_string += " " + std::to_string(times[i][0] * us);
+      if (i > 0) data_string += " ";
+      data_string += std::to_string(times[i] * us);
     }
     data_string += "\n";
     
@@ -272,10 +273,11 @@ void Cyclotron::run() const
 
     if (switcheroo) {
       std::string switches_path = output_path + "/switches.asc";
-      header = "# rank | Iteration context switches\n";
-      data_string = std::to_string(rank);
+      header = "# Iteration context switches\n";
+      data_string = "";
       for (int i = 0; i < iters; i++) {
-        data_string += " " + std::to_string(switches[i]);
+        if (i > 0) data_string += " ";
+        data_string += std::to_string(switches[i]);
       }
       data_string += "\n";
 
