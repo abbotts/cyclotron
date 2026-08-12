@@ -243,10 +243,11 @@ void Cyclotron::run() const
     // is if we just write starts to one file and ends to the other
     std::string starts_path = output_path + "/starts.asc";
     std::string ends_path = output_path + "/ends.asc";
-    header = "# rank | Iteration start times (us)\n";
-    data_string = std::to_string(rank);
+    header = "# Iteration start times (us)\n";
+    data_string = "";
     for (int i = 0; i < iters; i++) {
-      data_string += " " + std::to_string(times[i][1] * us);
+      if (i > 0) data_string += " ";
+      data_string += std::to_string(times[i][1] * us);
     }
     data_string += "\n";
 
@@ -257,10 +258,11 @@ void Cyclotron::run() const
     MPI_File_write_ordered(fh,data_string.c_str(),data_string.size(),MPI_CHAR,MPI_STATUS_IGNORE);
     MPI_File_close(&fh);
 
-    header = "# rank | Iteration end times (us)\n";
-    data_string = std::to_string(rank);
+    header = "# Iteration end times (us)\n";
+    data_string = "";
     for (int i = 0; i < iters; i++) {
-      data_string += " " + std::to_string(times[i][2] * us);
+      if (i > 0) data_string += " ";
+      data_string += std::to_string(times[i][2] * us);
     }
     data_string += "\n";
 
