@@ -226,7 +226,7 @@ void Cyclotron::run() const
     for (int i = 0; i < iters; i++) {
       // Yes this is slow as molasses. As long as iter_count isn't gigantic it should be fine
       if (i > 0) data_string += " ";
-      data_string += std::to_string(times[i] * us);
+      data_string += std::to_string(times[i][0] * us);
     }
     data_string += "\n";
     
