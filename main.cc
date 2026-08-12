@@ -20,7 +20,7 @@ int main(int argc, char **argv)
   
   int arglen = 0;
   const char *const cmd = argv[0];
-  for (char c = 0; c != -1; c = getopt(argc,argv,":hbci:r:s:o:")) {
+  for (int c = 0; c != -1; c = getopt(argc,argv,":hbci:r:s:o:")) {
     switch(c) {
       case '?':
         mfprintf(stderr,"ERROR: %s unknown argument '-%c'\n",cmd,optopt);
